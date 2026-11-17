@@ -412,8 +412,9 @@ app.post('/api/sms/send', async (req, res) => {
   }
 });
 
-// Built Vite assets for the Admin Portal
+// Built Vite assets for the Admin Portal and public static assets
 app.use('/assets', express.static(path.join(__dirname, 'dist', 'assets')));
+app.use('/assets', express.static(path.join(__dirname, 'public', 'assets')));
 
 // Admin Portal route
 app.get(['/admin', '/admin/', '/admin.html'], (_req, res) => {
