@@ -1,0 +1,222 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything unless explicitly permitted below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Global Hardened Primitives
+    // -------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() &&
+        request.auth.token.email in ['jabezpeter23@gmail.com', 'jccsondusogoc@gmail.com'];
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'createdBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 254 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role == 'admin' &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAdminNumber(data) {
+      return data.keys().hasAll(['label', 'phoneNumber', 'isDefault', 'ownerUid', 'ownerEmail', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['label', 'phoneNumber', 'isDefault', 'ownerUid', 'ownerEmail', 'createdAt', 'updatedAt']) &&
+        data.label is string && data.label.size() >= 1 && data.label.size() <= 80 &&
+        data.phoneNumber is string && data.phoneNumber.size() >= 8 && data.phoneNumber.size() <= 20 &&
+        data.phoneNumber.matches('^\\+[1-9][0-9]{6,14}$') &&
+        data.isDefault is bool &&
+        isValidId(data.ownerUid) &&
+        data.ownerEmail is string && data.ownerEmail.size() >= 5 && data.ownerEmail.size() <= 254 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCongregant(data) {
+      return data.keys().hasAll(['name', 'gender', 'phoneNumber', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'gender', 'phoneNumber', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.gender in ['Male', 'Female', 'Other'] &&
+        data.phoneNumber is string && data.phoneNumber.size() >= 8 && data.phoneNumber.size() <= 20 &&
+        data.phoneNumber.matches('^\\+[1-9][0-9]{6,14}$') &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSmsCampaign(data) {
+      return data.keys().hasAll([
+          'senderNumber', 'senderLabel', 'message', 'targetFilter',
+          'recipientCount', 'sentCount', 'failedCount', 'status',
+          'provider', 'errorMessage', 'createdBy', 'createdByEmail', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'senderNumber', 'senderLabel', 'message', 'targetFilter',
+          'recipientCount', 'sentCount', 'failedCount', 'status',
+          'provider', 'errorMessage', 'createdBy', 'createdByEmail', 'createdAt'
+        ]) &&
+        data.senderNumber is string && data.senderNumber.size() >= 8 && data.senderNumber.size() <= 20 &&
+        data.senderNumber.matches('^\\+[1-9][0-9]{6,14}$') &&
+        data.senderLabel is string && data.senderLabel.size() >= 1 && data.senderLabel.size() <= 80 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 640 &&
+        data.targetFilter in ['All', 'Male', 'Female', 'Other', 'Custom'] &&
+        data.recipientCount is int && data.recipientCount >= 1 && data.recipientCount <= 50000 &&
+        data.sentCount is int && data.sentCount >= 0 && data.sentCount <= data.recipientCount &&
+        data.failedCount is int && data.failedCount >= 0 && data.failedCount <= data.recipientCount &&
+        (data.sentCount + data.failedCount) == data.recipientCount &&
+        data.status in ['sent', 'partial', 'failed'] &&
+        data.provider is string && data.provider.size() >= 1 && data.provider.size() <= 40 &&
+        data.errorMessage is string && data.errorMessage.size() <= 500 &&
+        isValidId(data.createdBy) &&
+        data.createdByEmail is string && data.createdByEmail.size() >= 5 && data.createdByEmail.size() <= 254 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSmsCampaignRecipient(data) {
+      return data.keys().hasAll([
+          'congregantId', 'congregantName', 'phoneNumber',
+          'status', 'providerMessageId', 'error', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'congregantId', 'congregantName', 'phoneNumber',
+          'status', 'providerMessageId', 'error', 'createdAt'
+        ]) &&
+        isValidId(data.congregantId) &&
+        data.congregantName is string && data.congregantName.size() >= 1 && data.congregantName.size() <= 120 &&
+        data.phoneNumber is string && data.phoneNumber.size() >= 8 && data.phoneNumber.size() <= 20 &&
+        data.phoneNumber.matches('^\\+[1-9][0-9]{6,14}$') &&
+        data.status in ['sent', 'failed'] &&
+        data.providerMessageId is string && data.providerMessageId.size() <= 128 &&
+        data.error is string && data.error.size() <= 300 &&
+        data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collections
+    // -------------------------------------------------------------------------
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && ((isVerifiedUser() && request.auth.uid == adminId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(adminId) &&
+        isVerifiedUser() &&
+        isValidAdminUser(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+      allow update: if false;
+      allow delete: if isValidId(adminId) && isAdmin() && adminId != request.auth.uid;
+    }
+
+    match /adminNumbers/{numberId} {
+      allow get: if isValidId(numberId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(numberId) &&
+        isVerifiedUser() &&
+        isValidAdminNumber(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isValidId(numberId) &&
+        isVerifiedUser() &&
+        isValidAdminNumber(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().ownerEmail == existing().ownerEmail &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['label', 'phoneNumber', 'isDefault', 'updatedAt']) &&
+        isAdmin();
+      allow delete: if isValidId(numberId) && isAdmin();
+    }
+
+    match /congregants/{congregantId} {
+      allow get: if isValidId(congregantId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(congregantId) &&
+        isVerifiedUser() &&
+        isValidCongregant(incoming()) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isValidId(congregantId) &&
+        isVerifiedUser() &&
+        isValidCongregant(incoming()) &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'gender', 'phoneNumber', 'updatedAt']) &&
+        isAdmin();
+      allow delete: if isValidId(congregantId) && isAdmin();
+    }
+
+    match /smsCampaigns/{campaignId} {
+      allow get: if isValidId(campaignId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(campaignId) &&
+        isVerifiedUser() &&
+        isValidSmsCampaign(incoming()) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+      allow update: if false;
+      allow delete: if isValidId(campaignId) && isAdmin();
+
+      match /recipients/{recipientId} {
+        allow get: if isValidId(campaignId) &&
+          isValidId(recipientId) &&
+          isAdmin() &&
+          exists(/databases/$(database)/documents/smsCampaigns/$(campaignId));
+        allow list: if isValidId(campaignId) && isAdmin();
+        allow create: if isValidId(campaignId) &&
+          isValidId(recipientId) &&
+          isVerifiedUser() &&
+          isValidSmsCampaignRecipient(incoming()) &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/smsCampaigns/$(campaignId)) &&
+          isAdmin();
+        allow update: if false;
+        allow delete: if isValidId(campaignId) && isValidId(recipientId) && isAdmin();
+      }
+    }
+  }
+}

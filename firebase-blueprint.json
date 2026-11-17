@@ -1,0 +1,322 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator account permitted to access the JCC Sondu admin portal.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified Google account email address of the administrator.",
+          "minLength": 5,
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the administrator.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Role assigned to the account."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the admin who granted access.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin access was granted."
+        }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdBy", "createdAt"]
+    },
+    "AdminNumber": {
+      "title": "AdminNumber",
+      "description": "Phone number added by an admin to use as a sender or contact number for mass SMS.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Descriptive label for this admin phone number (e.g., Pastor Office Line).",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Normalized E.164 phone number.",
+          "minLength": 8,
+          "maxLength": 20,
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "Whether this number is selected by default when composing mass SMS."
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the admin who added this number.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Email of the admin who added this number.",
+          "minLength": 5,
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the number was added."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the number was last updated."
+        }
+      },
+      "required": ["label", "phoneNumber", "isDefault", "ownerUid", "ownerEmail", "createdAt", "updatedAt"]
+    },
+    "Congregant": {
+      "title": "Congregant",
+      "description": "Congregant record stored by JCC Sondu admins for directory management and mass SMS outreach.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the congregant.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["Male", "Female", "Other"],
+          "description": "Gender of the congregant."
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Normalized E.164 phone number of the congregant.",
+          "minLength": 8,
+          "maxLength": 20,
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the admin who created this congregant record.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the congregant record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the congregant record was last updated."
+        }
+      },
+      "required": ["name", "gender", "phoneNumber", "createdBy", "createdAt", "updatedAt"]
+    },
+    "SmsCampaign": {
+      "title": "SmsCampaign",
+      "description": "Mass SMS dispatch record initiated by an administrator.",
+      "type": "object",
+      "properties": {
+        "senderNumber": {
+          "type": "string",
+          "description": "Admin phone number associated with this campaign.",
+          "minLength": 8,
+          "maxLength": 20,
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "senderLabel": {
+          "type": "string",
+          "description": "Label of the sender number used.",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "message": {
+          "type": "string",
+          "description": "Body of the mass SMS message.",
+          "minLength": 1,
+          "maxLength": 640
+        },
+        "targetFilter": {
+          "type": "string",
+          "enum": ["All", "Male", "Female", "Other", "Custom"],
+          "description": "Audience filter selected by the administrator."
+        },
+        "recipientCount": {
+          "type": "integer",
+          "description": "Total number of congregants targeted."
+        },
+        "sentCount": {
+          "type": "integer",
+          "description": "Count of messages accepted by the SMS carrier."
+        },
+        "failedCount": {
+          "type": "integer",
+          "description": "Count of messages that failed to dispatch."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["sent", "partial", "failed"],
+          "description": "Overall dispatch status reported by the SMS backend."
+        },
+        "provider": {
+          "type": "string",
+          "description": "SMS gateway provider used for dispatch (e.g., africastalking, twilio, unconfigured).",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "errorMessage": {
+          "type": "string",
+          "description": "Error summary when dispatch fails or is unconfigured.",
+          "maxLength": 500
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the admin who initiated the campaign.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdByEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Email of the admin who initiated the campaign.",
+          "minLength": 5,
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the campaign was logged."
+        }
+      },
+      "required": [
+        "senderNumber",
+        "senderLabel",
+        "message",
+        "targetFilter",
+        "recipientCount",
+        "sentCount",
+        "failedCount",
+        "status",
+        "provider",
+        "errorMessage",
+        "createdBy",
+        "createdByEmail",
+        "createdAt"
+      ]
+    },
+    "SmsCampaignRecipient": {
+      "title": "SmsCampaignRecipient",
+      "description": "Per-recipient delivery outcome sub-record for a mass SMS campaign.",
+      "type": "object",
+      "properties": {
+        "congregantId": {
+          "type": "string",
+          "description": "Document ID of the targeted congregant.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "congregantName": {
+          "type": "string",
+          "description": "Snapshot name of the congregant at dispatch time.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Normalized E.164 phone number targeted.",
+          "minLength": 8,
+          "maxLength": 20,
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["sent", "failed"],
+          "description": "Per-recipient carrier delivery status."
+        },
+        "providerMessageId": {
+          "type": "string",
+          "description": "External SMS provider message reference if accepted.",
+          "maxLength": 128
+        },
+        "error": {
+          "type": "string",
+          "description": "Error detail if delivery failed.",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the recipient log was created."
+        }
+      },
+      "required": [
+        "congregantId",
+        "congregantName",
+        "phoneNumber",
+        "status",
+        "providerMessageId",
+        "error",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": {
+        "$ref": "#/entities/AdminUser"
+      },
+      "description": "Authorized admin users allowed into the JCC Sondu admin portal."
+    },
+    "/adminNumbers/{numberId}": {
+      "schema": {
+        "$ref": "#/entities/AdminNumber"
+      },
+      "description": "Phone numbers registered by administrators for mass SMS outreach."
+    },
+    "/congregants/{congregantId}": {
+      "schema": {
+        "$ref": "#/entities/Congregant"
+      },
+      "description": "Congregant directory containing name, gender, and phone number."
+    },
+    "/smsCampaigns/{campaignId}": {
+      "schema": {
+        "$ref": "#/entities/SmsCampaign"
+      },
+      "description": "Mass SMS dispatch campaign logs."
+    },
+    "/smsCampaigns/{campaignId}/recipients/{recipientId}": {
+      "schema": {
+        "$ref": "#/entities/SmsCampaignRecipient"
+      },
+      "description": "Subcollection storing per-recipient dispatch results for each SMS campaign."
+    }
+  }
+}
