@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
   onAuthStateChanged,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -22,7 +21,6 @@ import {
   LogIn,
   LogOut,
   Mail,
-  RefreshCw,
   ShieldAlert,
 } from 'lucide-react';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -31,6 +29,7 @@ import { isValidAdminEmailAddress, normalizeEmail } from './blueprintConstraints
 import {
   createCongregant,
   deleteCongregant,
+  ensureAdminPassSession,
   subscribeAdminEmails,
   subscribeAdminNumbers,
   subscribeAdmins,
@@ -69,6 +68,7 @@ export function App() {
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [unauthorizedHost, setUnauthorizedHost] = useState<string | null>(null);
   const [emailProviderDisabled, setEmailProviderDisabled] = useState(false);
+  const [emailAlreadyInUse, setEmailAlreadyInUse] = useState(false);
   const [copiedHost, setCopiedHost] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [authMode, setAuthMode] = useState<'password' | 'google'>('password');
@@ -76,8 +76,6 @@ export function App() {
   const [passwordEmail, setPasswordEmail] = useState('');
   const [secretPassword, setSecretPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [resendingVerification, setResendingVerification] = useState(false);
-  const [refreshingVerification, setRefreshingVerification] = useState(false);
 
   const [activeSection, setActiveSection] = useState<AdminNavSection>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -100,6 +98,8 @@ export function App() {
   const [editingCongregant, setEditingCongregant] = useState<CongregantRecord | null>(null);
   const [preselectedSmsIds, setPreselectedSmsIds] = useState<string[]>([]);
 
+  const passwordSignInInProgressRef = useRef(false);
+
   if (fatalDataError) {
     throw fatalDataError;
   }
@@ -111,6 +111,11 @@ export function App() {
       if (!nextUser) {
         setIsAdmin(false);
         setCheckingAdmin(false);
+        setAuthReady(true);
+        return;
+      }
+
+      if (passwordSignInInProgressRef.current) {
         setAuthReady(true);
         return;
       }
@@ -203,6 +208,7 @@ export function App() {
     setAuthNotice(null);
     setUnauthorizedHost(null);
     setEmailProviderDisabled(false);
+    setEmailAlreadyInUse(false);
 
     const trimmedEmail = normalizeEmail(manualGoogleEmail);
     if (trimmedEmail && !isValidAdminEmailAddress(trimmedEmail)) {
@@ -255,10 +261,11 @@ export function App() {
     setAuthNotice(null);
     setUnauthorizedHost(null);
     setEmailProviderDisabled(false);
+    setEmailAlreadyInUse(false);
 
     const email = normalizeEmail(passwordEmail);
     if (!isValidAdminEmailAddress(email)) {
-      setAuthError('Enter a valid administrator Gmail / email address.');
+      setAuthError('Enter a valid administrator email address.');
       return;
     }
     if (!secretPassword) {
@@ -266,59 +273,87 @@ export function App() {
       return;
     }
 
+    const gateCheck = await verifyAdminSecretPassword(email, secretPassword);
+    if (!gateCheck.ok) {
+      setAuthError(gateCheck.error || 'Invalid administrator email or secret password.');
+      return;
+    }
+
+    passwordSignInInProgressRef.current = true;
     setSigningIn(true);
     try {
-      await signInWithEmailAndPassword(auth, email, secretPassword);
-    } catch (err) {
-      const code =
-        typeof err === 'object' && err !== null && 'code' in err
-          ? String((err as { code?: unknown }).code ?? '')
-          : '';
+      let signedInUser: User | null = null;
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, secretPassword);
+        signedInUser = cred.user;
+      } catch (signInErr) {
+        const signInCode =
+          typeof signInErr === 'object' && signInErr !== null && 'code' in signInErr
+            ? String((signInErr as { code?: unknown }).code ?? '')
+            : '';
 
-      if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
-        setEmailProviderDisabled(true);
-        setAuthError(
-          'Email/Password sign-in is not enabled yet in your Firebase project.'
-        );
-      } else if (
-        code === 'auth/user-not-found' ||
-        code === 'auth/invalid-credential' ||
-        code === 'auth/wrong-password'
-      ) {
-        const gateCheck = await verifyAdminSecretPassword(email, secretPassword);
-        if (!gateCheck.ok) {
-          setAuthError(gateCheck.error || 'Invalid administrator email or secret password.');
+        if (
+          signInCode === 'auth/operation-not-allowed' ||
+          signInCode === 'auth/configuration-not-found'
+        ) {
+          setEmailProviderDisabled(true);
+          setAuthError('Email/Password sign-in is not enabled yet in your Firebase project.');
           return;
         }
-        try {
-          const cred = await createUserWithEmailAndPassword(auth, email, secretPassword);
-          if (!cred.user.emailVerified) {
-            await sendEmailVerification(cred.user).catch(() => undefined);
+
+        if (
+          signInCode === 'auth/user-not-found' ||
+          signInCode === 'auth/invalid-credential' ||
+          signInCode === 'auth/wrong-password'
+        ) {
+          try {
+            const createCred = await createUserWithEmailAndPassword(auth, email, secretPassword);
+            signedInUser = createCred.user;
+          } catch (createErr) {
+            const createCode =
+              typeof createErr === 'object' && createErr !== null && 'code' in createErr
+                ? String((createErr as { code?: unknown }).code ?? '')
+                : '';
+
+            if (
+              createCode === 'auth/operation-not-allowed' ||
+              createCode === 'auth/configuration-not-found'
+            ) {
+              setEmailProviderDisabled(true);
+              setAuthError('Email/Password sign-in is not enabled yet in your Firebase project.');
+              return;
+            }
+            if (createCode === 'auth/email-already-in-use') {
+              setEmailAlreadyInUse(true);
+              setAuthError(
+                `${email} was previously registered via Google Sign-In without a password.`
+              );
+              return;
+            }
+            throw createErr;
           }
-        } catch (createErr) {
-          const createCode =
-            typeof createErr === 'object' && createErr !== null && 'code' in createErr
-              ? String((createErr as { code?: unknown }).code ?? '')
-              : '';
-          if (createCode === 'auth/operation-not-allowed' || createCode === 'auth/configuration-not-found') {
-            setEmailProviderDisabled(true);
-            setAuthError(
-              'Email/Password sign-in is not enabled yet in your Firebase project.'
-            );
-          } else if (createCode === 'auth/email-already-in-use') {
-            setAuthError(
-              `${email} already has an account (for example via Google Sign-In or a different password). Sign in with Google once and link the secret password under Admin Numbers, or send a password reset email.`
-            );
-          } else {
-            setAuthError(
-              createErr instanceof Error ? createErr.message : 'Unable to sign in with email and password.'
-            );
-          }
+        } else {
+          throw signInErr;
         }
-      } else {
-        setAuthError(err instanceof Error ? err.message : 'Unable to sign in.');
       }
+
+      if (signedInUser) {
+        if (!signedInUser.emailVerified) {
+          await ensureAdminPassSession(signedInUser, secretPassword);
+        }
+        const authorized = await verifyUserIsAdmin(signedInUser);
+        setIsAdmin(authorized);
+        if (!authorized) {
+          setAuthError(
+            `${email} is not authorized as a JCC Sondu administrator yet. Ask a primary administrator to authorize it under Admin Numbers.`
+          );
+        }
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Unable to sign in.');
     } finally {
+      passwordSignInInProgressRef.current = false;
+      setCheckingAdmin(false);
       setSigningIn(false);
     }
   };
@@ -328,54 +363,19 @@ export function App() {
     setAuthNotice(null);
     const email = normalizeEmail(passwordEmail);
     if (!isValidAdminEmailAddress(email)) {
-      setAuthError('Enter your administrator email address above before requesting a password reset.');
+      setAuthError('Enter your administrator email address above before requesting password setup.');
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email);
-      setAuthNotice(`Password reset instructions have been sent to ${email}.`);
+      setEmailAlreadyInUse(false);
+      setAuthNotice(
+        `Password setup email sent to ${email}. Open the link, set @JCCSondu2026 as your password, then sign in right here.`
+      );
     } catch (err) {
       setAuthError(
-        err instanceof Error ? err.message : 'Unable to send password reset email.'
+        err instanceof Error ? err.message : 'Unable to send password setup email.'
       );
-    }
-  };
-
-  const handleResendVerification = async () => {
-    if (!auth.currentUser) return;
-    setAuthError(null);
-    setAuthNotice(null);
-    setResendingVerification(true);
-    try {
-      await sendEmailVerification(auth.currentUser);
-      setAuthNotice(`Verification email resent to ${auth.currentUser.email}.`);
-    } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Unable to resend verification email right now.'
-      );
-    } finally {
-      setResendingVerification(false);
-    }
-  };
-
-  const handleRefreshVerification = async () => {
-    if (!auth.currentUser) return;
-    setAuthError(null);
-    setRefreshingVerification(true);
-    try {
-      await auth.currentUser.reload();
-      const updatedUser = auth.currentUser;
-      setUser(updatedUser);
-      if (updatedUser.emailVerified) {
-        const authorized = await verifyUserIsAdmin(updatedUser);
-        setIsAdmin(authorized);
-      } else {
-        setAuthError('Email is still unverified. Click the link sent to your Gmail inbox first.');
-      }
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Unable to refresh verification status.');
-    } finally {
-      setRefreshingVerification(false);
     }
   };
 
@@ -404,7 +404,7 @@ export function App() {
     }
   };
 
-  if (!authReady || checkingAdmin) {
+  if (!authReady || (checkingAdmin && !signingIn)) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="w-full max-w-sm bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
@@ -417,7 +417,7 @@ export function App() {
     );
   }
 
-  if (!user) {
+  if (!user || signingIn) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-8">
@@ -526,6 +526,21 @@ export function App() {
                     <span>Enable Email/Password Provider</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
+                </div>
+              )}
+              {emailAlreadyInUse && (
+                <div className="pt-2 border-t border-red-200 text-xs text-slate-700 space-y-2">
+                  <p>
+                    Send a one-click password setup email so you can sign in with this email and <span className="font-mono font-medium">@JCCSondu2026</span> without Google Sign-In:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handlePasswordReset}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#123c69] rounded-md hover:bg-[#092b4c] cursor-pointer"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Send Password Setup Email</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -639,67 +654,6 @@ export function App() {
               </button>
             </form>
           )}
-        </div>
-      </div>
-    );
-  }
-
-  if (!user.emailVerified) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-8">
-          <div className="w-11 h-11 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center mb-4">
-            <Mail className="w-5 h-5" />
-          </div>
-          <h1 className="text-lg font-bold text-slate-900">
-            Verify Your Admin Email
-          </h1>
-          <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
-            A verification link has been sent to{' '}
-            <span className="font-medium text-slate-900">{user.email}</span>. Open that link in your inbox once to activate secure administrator access, then click below.
-          </p>
-
-          {authNotice && (
-            <div className="mt-4 p-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg">
-              {authNotice}
-            </div>
-          )}
-
-          {authError && (
-            <div className="mt-4 p-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg">
-              {authError}
-            </div>
-          )}
-
-          <div className="mt-6 space-y-2.5">
-            <button
-              type="button"
-              onClick={handleRefreshVerification}
-              disabled={refreshingVerification}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#123c69] rounded-lg hover:bg-[#092b4c] disabled:opacity-60 cursor-pointer"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>{refreshingVerification ? 'Checking...' : 'I Have Verified My Email'}</span>
-            </button>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleResendVerification}
-                disabled={resendingVerification}
-                className="flex-1 px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer"
-              >
-                {resendingVerification ? 'Sending...' : 'Resend Link'}
-              </button>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Sign Out
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     );

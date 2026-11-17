@@ -86,20 +86,35 @@ async function verifyAdminBearerToken(authHeader) {
 
   const lookupData = await lookupRes.json();
   const account = lookupData?.users?.[0];
-  if (!account || !account.emailVerified) {
-    return { ok: false, status: 403, error: 'Verified Google account required.' };
+  if (!account) {
+    return { ok: false, status: 403, error: 'Invalid administrator account.' };
   }
 
   const email = String(account.email || '').toLowerCase();
   const uid = String(account.localId || '');
 
-  if (BOOTSTRAPPED_ADMIN_EMAILS.has(email)) {
-    return { ok: true, uid, email };
-  }
-
   const baseDocsUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
     firebaseConfig.projectId
   )}/databases/${encodeURIComponent(firebaseConfig.firestoreDatabaseId)}/documents`;
+
+  let isVerifiedSession = Boolean(account.emailVerified);
+  if (!isVerifiedSession && uid) {
+    const passSessionUrl = `${baseDocsUrl}/adminPassSessions/${encodeURIComponent(uid)}`;
+    const passSessionCheck = await fetch(passSessionUrl, {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (passSessionCheck.ok) {
+      isVerifiedSession = true;
+    }
+  }
+
+  if (!isVerifiedSession) {
+    return { ok: false, status: 403, error: 'Verified admin account or secret passcode session required.' };
+  }
+
+  if (BOOTSTRAPPED_ADMIN_EMAILS.has(email)) {
+    return { ok: true, uid, email };
+  }
 
   const adminDocUrl = `${baseDocsUrl}/admins/${encodeURIComponent(uid)}`;
   const adminCheck = await fetch(adminDocUrl, {

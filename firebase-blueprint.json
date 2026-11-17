@@ -84,6 +84,40 @@
       },
       "required": ["email", "displayName", "role", "createdBy", "createdAt"]
     },
+    "AdminPassSession": {
+      "title": "AdminPassSession",
+      "description": "Passcode-verified admin session record allowing authorized admins to access the portal using email and secret password without Google OAuth.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the signed-in admin.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Normalized lowercase authorized admin email.",
+          "minLength": 5,
+          "maxLength": 254,
+          "pattern": "^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$"
+        },
+        "passcode": {
+          "type": "string",
+          "description": "Portal secret passcode validated via SHA-256 in Firestore rules.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the passcode session was created."
+        }
+      },
+      "required": ["uid", "email", "passcode", "createdAt"]
+    },
     "AdminNumber": {
       "title": "AdminNumber",
       "description": "Phone number added by an admin to use as a sender or contact number for mass SMS.",
@@ -338,6 +372,12 @@
         "$ref": "#/entities/AdminEmail"
       },
       "description": "Authorized Google email addresses manually added by admins for portal access."
+    },
+    "/adminPassSessions/{uid}": {
+      "schema": {
+        "$ref": "#/entities/AdminPassSession"
+      },
+      "description": "Passcode-verified admin login sessions for authorized admin emails."
     },
     "/adminNumbers/{numberId}": {
       "schema": {

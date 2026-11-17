@@ -43,8 +43,48 @@ import type {
   TargetFilter,
 } from '../types';
 
+export async function hasAdminPassSession(uid: string): Promise<boolean> {
+  const path = `adminPassSessions/${uid}`;
+  try {
+    const snap = await getDoc(doc(db, 'adminPassSessions', uid));
+    return snap.exists();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+export async function ensureAdminPassSession(
+  user: User,
+  passcode: string
+): Promise<boolean> {
+  const email = user.email ? normalizeEmail(user.email) : '';
+  if (!email || !isValidAdminEmailAddress(email) || !passcode) {
+    return false;
+  }
+
+  try {
+    const existing = await getDoc(doc(db, 'adminPassSessions', user.uid));
+    if (existing.exists()) {
+      return true;
+    }
+    await setDoc(doc(db, 'adminPassSessions', user.uid), {
+      uid: user.uid,
+      email,
+      passcode,
+      createdAt: serverTimestamp(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function verifyUserIsAdmin(user: User): Promise<boolean> {
-  if (!user.emailVerified) {
+  let verified = user.emailVerified;
+  if (!verified) {
+    verified = await hasAdminPassSession(user.uid);
+  }
+  if (!verified) {
     return false;
   }
   if (isBootstrappedAdminEmail(user.email)) {
