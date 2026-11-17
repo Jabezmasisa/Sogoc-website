@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import {
+  GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
   signOut,
   type User,
 } from 'firebase/auth';
-import { ArrowLeft, Lock, LogIn, LogOut, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Lock, LogIn, LogOut, Mail, ShieldAlert } from 'lucide-react';
 import { auth, googleProvider } from './firebase';
+import { isValidAdminEmailAddress, normalizeEmail } from './blueprintConstraints';
 import {
   createCongregant,
   deleteCongregant,
+  subscribeAdminEmails,
   subscribeAdminNumbers,
   subscribeAdmins,
   subscribeCongregants,
@@ -19,6 +22,7 @@ import {
 } from './services/firestoreService';
 import { fetchSmsGatewayConfig } from './services/smsApi';
 import type {
+  AdminEmailRecord,
   AdminNavSection,
   AdminNumberRecord,
   AdminUserRecord,
@@ -43,6 +47,7 @@ export function App() {
   const [checkingAdmin, setCheckingAdmin] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+  const [manualGoogleEmail, setManualGoogleEmail] = useState('');
 
   const [activeSection, setActiveSection] = useState<AdminNavSection>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -51,6 +56,7 @@ export function App() {
   const [adminNumbers, setAdminNumbers] = useState<AdminNumberRecord[]>([]);
   const [campaigns, setCampaigns] = useState<SmsCampaignRecord[]>([]);
   const [admins, setAdmins] = useState<AdminUserRecord[]>([]);
+  const [adminEmails, setAdminEmails] = useState<AdminEmailRecord[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [fatalDataError, setFatalDataError] = useState<Error | null>(null);
 
@@ -102,6 +108,7 @@ export function App() {
       setAdminNumbers([]);
       setCampaigns([]);
       setAdmins([]);
+      setAdminEmails([]);
       setDataLoading(false);
       return;
     }
@@ -144,6 +151,11 @@ export function App() {
       (err) => setFatalDataError(err)
     );
 
+    const unsubAdminEmails = subscribeAdminEmails(
+      (items) => setAdminEmails(items),
+      (err) => setFatalDataError(err)
+    );
+
     void fetchSmsGatewayConfig().then(setSmsConfig);
 
     return () => {
@@ -151,14 +163,32 @@ export function App() {
       unsubNumbers();
       unsubCampaigns();
       unsubAdmins();
+      unsubAdminEmails();
     };
   }, [authReady, user, isAdmin]);
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setAuthError(null);
+
+    const trimmedEmail = normalizeEmail(manualGoogleEmail);
+    if (trimmedEmail && !isValidAdminEmailAddress(trimmedEmail)) {
+      setAuthError('Enter a valid Google email address or leave the field blank to pick an account.');
+      return;
+    }
+
     setSigningIn(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      if (trimmedEmail) {
+        const hintedProvider = new GoogleAuthProvider();
+        hintedProvider.setCustomParameters({
+          prompt: 'select_account',
+          login_hint: trimmedEmail,
+        });
+        await signInWithPopup(auth, hintedProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (err) {
       setAuthError(
         err instanceof Error ? err.message : 'Google Sign-In did not complete.'
@@ -228,15 +258,40 @@ export function App() {
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={handleSignIn}
-            disabled={signingIn}
-            className="w-full inline-flex items-center justify-center gap-2.5 px-5 py-3 text-sm font-medium text-white bg-[#123c69] rounded-lg hover:bg-[#092b4c] disabled:opacity-60 transition-colors cursor-pointer"
-          >
-            <LogIn className="w-4 h-4" />
-            <span>{signingIn ? 'Signing In...' : 'Sign in with Google'}</span>
-          </button>
+          <form onSubmit={handleSignIn} className="space-y-4">
+            <div>
+              <label
+                htmlFor="manual-google-email"
+                className="block text-xs font-medium text-slate-700 mb-1.5"
+              >
+                Admin Google Email (optional)
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="manual-google-email"
+                  type="email"
+                  value={manualGoogleEmail}
+                  onChange={(e) => setManualGoogleEmail(e.target.value)}
+                  placeholder="e.g. jccsondusogoc@gmail.com"
+                  autoComplete="email"
+                  className="w-full pl-10 pr-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#123c69]/20 focus:border-[#123c69]"
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-slate-500">
+                Key in your Google email manually to sign straight into that account, or leave blank to choose from Google.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={signingIn}
+              className="w-full inline-flex items-center justify-center gap-2.5 px-5 py-3 text-sm font-medium text-white bg-[#123c69] rounded-lg hover:bg-[#092b4c] disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>{signingIn ? 'Signing In...' : 'Sign in with Google'}</span>
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -257,7 +312,7 @@ export function App() {
             <span className="font-medium text-slate-900">
               {user.email ?? user.uid}
             </span>{' '}
-            is not authorized to view or modify JCC Sondu congregant records.
+            is not authorized to view or modify JCC Sondu congregant records. An existing portal administrator can authorize this Google email under Admin Numbers.
           </p>
           {authError && (
             <p className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
@@ -362,6 +417,7 @@ export function App() {
               user={user}
               adminNumbers={adminNumbers}
               admins={admins}
+              adminEmails={adminEmails}
               loading={dataLoading}
             />
           )}

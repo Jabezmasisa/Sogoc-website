@@ -22,6 +22,15 @@ export interface AdminUserRecord {
   createdAt: Timestamp | null;
 }
 
+export interface AdminEmailRecord {
+  id: string;
+  email: string;
+  displayName: string;
+  role: 'admin';
+  createdBy: string;
+  createdAt: Timestamp | null;
+}
+
 export interface AdminNumberRecord {
   id: string;
   label: string;

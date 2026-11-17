@@ -45,6 +45,45 @@
       },
       "required": ["uid", "email", "displayName", "role", "createdBy", "createdAt"]
     },
+    "AdminEmail": {
+      "title": "AdminEmail",
+      "description": "Authorized Google email address manually keyed in by an administrator to grant JCC Sondu admin portal access.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Normalized lowercase Google account email address authorized for admin access.",
+          "minLength": 5,
+          "maxLength": 254,
+          "pattern": "^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name or ministry role label for this administrator.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Role assigned to the email."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator who added this email.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the email was authorized."
+        }
+      },
+      "required": ["email", "displayName", "role", "createdBy", "createdAt"]
+    },
     "AdminNumber": {
       "title": "AdminNumber",
       "description": "Phone number added by an admin to use as a sender or contact number for mass SMS.",
@@ -293,6 +332,12 @@
         "$ref": "#/entities/AdminUser"
       },
       "description": "Authorized admin users allowed into the JCC Sondu admin portal."
+    },
+    "/adminEmails/{emailId}": {
+      "schema": {
+        "$ref": "#/entities/AdminEmail"
+      },
+      "description": "Authorized Google email addresses manually added by admins for portal access."
     },
     "/adminNumbers/{numberId}": {
       "schema": {

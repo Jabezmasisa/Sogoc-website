@@ -17,17 +17,21 @@ import {
 import type { User } from 'firebase/auth';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
+  ADMIN_EMAIL_CONSTRAINTS,
   ADMIN_NUMBER_CONSTRAINTS,
   ADMIN_USER_CONSTRAINTS,
   CONGREGANT_CONSTRAINTS,
   isBootstrappedAdminEmail,
+  isValidAdminEmailAddress,
   isValidPhoneNumber,
+  normalizeEmail,
   normalizePhoneNumber,
   sanitizeBoundedText,
   sanitizeMessageText,
   SMS_CAMPAIGN_CONSTRAINTS,
 } from '../blueprintConstraints';
 import type {
+  AdminEmailRecord,
   AdminNumberRecord,
   AdminUserRecord,
   CampaignStatus,
@@ -46,12 +50,27 @@ export async function verifyUserIsAdmin(user: User): Promise<boolean> {
   if (isBootstrappedAdminEmail(user.email)) {
     return true;
   }
-  const path = `admins/${user.uid}`;
+  const uidPath = `admins/${user.uid}`;
   try {
     const snap = await getDoc(doc(db, 'admins', user.uid));
-    return snap.exists();
+    if (snap.exists()) {
+      return true;
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.GET, uidPath);
+  }
+
+  const normalizedEmail = user.email ? normalizeEmail(user.email) : '';
+  if (!normalizedEmail || !isValidAdminEmailAddress(normalizedEmail)) {
+    return false;
+  }
+
+  const emailPath = `adminEmails/${normalizedEmail}`;
+  try {
+    const emailSnap = await getDoc(doc(db, 'adminEmails', normalizedEmail));
+    return emailSnap.exists();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, emailPath);
   }
 }
 
@@ -489,4 +508,89 @@ export function subscribeAdmins(
       }
     }
   );
+}
+
+export function subscribeAdminEmails(
+  onData: (items: AdminEmailRecord[]) => void,
+  onError: (err: Error) => void
+): Unsubscribe {
+  const path = 'adminEmails';
+  const q = query(collection(db, path), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const records: AdminEmailRecord[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          email: String(data.email ?? d.id),
+          displayName: String(data.displayName ?? ''),
+          role: 'admin',
+          createdBy: String(data.createdBy ?? ''),
+          createdAt: data.createdAt ?? null,
+        };
+      });
+      onData(records);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export async function createAdminEmail(
+  input: { email: string; displayName: string },
+  adminUser: User
+): Promise<string> {
+  const email = normalizeEmail(input.email);
+  if (!isValidAdminEmailAddress(email)) {
+    throw new Error('Enter a valid Google email address (e.g., name@gmail.com).');
+  }
+  if (isBootstrappedAdminEmail(email)) {
+    throw new Error(`${email} is already a primary administrator.`);
+  }
+
+  const fallbackName = email.split('@')[0] || 'Administrator';
+  const displayName = sanitizeBoundedText(
+    input.displayName || fallbackName,
+    ADMIN_EMAIL_CONSTRAINTS.displayNameMax
+  );
+  if (displayName.length < ADMIN_EMAIL_CONSTRAINTS.displayNameMin) {
+    throw new Error('Enter a name or role label for this administrator.');
+  }
+
+  const path = `adminEmails/${email}`;
+  try {
+    const existing = await getDoc(doc(db, 'adminEmails', email));
+    if (existing.exists()) {
+      throw new Error(`${email} is already authorized as an administrator.`);
+    }
+    await setDoc(doc(db, 'adminEmails', email), {
+      email,
+      displayName,
+      role: 'admin',
+      createdBy: adminUser.uid,
+      createdAt: serverTimestamp(),
+    });
+    return email;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('already authorized')) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteAdminEmail(emailId: string): Promise<void> {
+  const normalized = normalizeEmail(emailId);
+  const path = `adminEmails/${normalized}`;
+  try {
+    await deleteDoc(doc(db, 'adminEmails', normalized));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
 }

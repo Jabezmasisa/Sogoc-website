@@ -96,21 +96,30 @@ async function verifyAdminBearerToken(authHeader) {
     return { ok: true, uid, email };
   }
 
-  const adminDocUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+  const baseDocsUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
     firebaseConfig.projectId
-  )}/databases/${encodeURIComponent(
-    firebaseConfig.firestoreDatabaseId
-  )}/documents/admins/${encodeURIComponent(uid)}`;
+  )}/databases/${encodeURIComponent(firebaseConfig.firestoreDatabaseId)}/documents`;
 
+  const adminDocUrl = `${baseDocsUrl}/admins/${encodeURIComponent(uid)}`;
   const adminCheck = await fetch(adminDocUrl, {
     headers: { Authorization: `Bearer ${idToken}` },
   });
 
-  if (!adminCheck.ok) {
-    return { ok: false, status: 403, error: 'User is not an authorized administrator.' };
+  if (adminCheck.ok) {
+    return { ok: true, uid, email };
   }
 
-  return { ok: true, uid, email };
+  if (email) {
+    const adminEmailDocUrl = `${baseDocsUrl}/adminEmails/${encodeURIComponent(email)}`;
+    const emailCheck = await fetch(adminEmailDocUrl, {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (emailCheck.ok) {
+      return { ok: true, uid, email };
+    }
+  }
+
+  return { ok: false, status: 403, error: 'User is not an authorized administrator.' };
 }
 
 async function sendViaAfricasTalking({ recipients, message }) {

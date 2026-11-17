@@ -1,27 +1,43 @@
 import { useState } from 'react';
 import type { User } from 'firebase/auth';
-import { Check, Pencil, Phone, Plus, ShieldCheck, Star, Trash2 } from 'lucide-react';
 import {
+  Check,
+  Mail,
+  Pencil,
+  Phone,
+  Plus,
+  ShieldCheck,
+  Star,
+  Trash2,
+  UserPlus,
+} from 'lucide-react';
+import {
+  ADMIN_EMAIL_CONSTRAINTS,
   ADMIN_NUMBER_CONSTRAINTS,
   BOOTSTRAPPED_ADMIN_EMAILS,
   formatPhoneDisplay,
   isBootstrappedAdminEmail,
+  isValidAdminEmailAddress,
   isValidPhoneNumber,
+  normalizeEmail,
   normalizePhoneNumber,
 } from '../blueprintConstraints';
 import {
+  createAdminEmail,
   createAdminNumber,
+  deleteAdminEmail,
   deleteAdminNumber,
   setDefaultAdminNumber,
   updateAdminNumber,
 } from '../services/firestoreService';
-import type { AdminNumberRecord, AdminUserRecord } from '../types';
+import type { AdminEmailRecord, AdminNumberRecord, AdminUserRecord } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 
 interface AdminNumbersViewProps {
   user: User;
   adminNumbers: AdminNumberRecord[];
   admins: AdminUserRecord[];
+  adminEmails: AdminEmailRecord[];
   loading: boolean;
 }
 
@@ -29,6 +45,7 @@ export function AdminNumbersView({
   user,
   adminNumbers,
   admins,
+  adminEmails,
   loading,
 }: AdminNumbersViewProps) {
   const [label, setLabel] = useState('');
@@ -45,7 +62,16 @@ export function AdminNumbersView({
   const [deleteTarget, setDeleteTarget] = useState<AdminNumberRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [adminEmailInput, setAdminEmailInput] = useState('');
+  const [adminNameInput, setAdminNameInput] = useState('');
+  const [addingAdminEmail, setAddingAdminEmail] = useState(false);
+  const [adminEmailError, setAdminEmailError] = useState<string | null>(null);
+  const [adminEmailSuccess, setAdminEmailSuccess] = useState<string | null>(null);
+  const [deleteEmailTarget, setDeleteEmailTarget] = useState<AdminEmailRecord | null>(null);
+  const [deletingEmail, setDeletingEmail] = useState(false);
+
   const normalizedPreview = normalizePhoneNumber(phoneInput);
+  const currentUserEmail = user.email ? normalizeEmail(user.email) : '';
 
   const handleAddNumber = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,6 +137,49 @@ export function AdminNumbersView({
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleAddAdminEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminEmailError(null);
+    setAdminEmailSuccess(null);
+
+    const normalized = normalizeEmail(adminEmailInput);
+    if (!isValidAdminEmailAddress(normalized)) {
+      setAdminEmailError('Enter a valid Google email address (e.g., pastor@gmail.com).');
+      return;
+    }
+
+    setAddingAdminEmail(true);
+    try {
+      const savedEmail = await createAdminEmail(
+        {
+          email: normalized,
+          displayName: adminNameInput.trim(),
+        },
+        user
+      );
+      setAdminEmailInput('');
+      setAdminNameInput('');
+      setAdminEmailSuccess(`${savedEmail} can now sign in with Google to access the Admin Portal.`);
+    } catch (err) {
+      setAdminEmailError(
+        err instanceof Error ? err.message : 'Unable to authorize Google email.'
+      );
+    } finally {
+      setAddingAdminEmail(false);
+    }
+  };
+
+  const handleConfirmDeleteEmail = async () => {
+    if (!deleteEmailTarget) return;
+    setDeletingEmail(true);
+    try {
+      await deleteAdminEmail(deleteEmailTarget.id);
+      setDeleteEmailTarget(null);
+    } finally {
+      setDeletingEmail(false);
     }
   };
 
@@ -348,34 +417,141 @@ export function AdminNumbersView({
         )}
       </section>
 
-      <section className="bg-white border border-slate-200 rounded-xl p-6">
-        <div className="flex items-center gap-2 mb-3">
-          <ShieldCheck className="w-4 h-4 text-[#123c69]" />
-          <h2 className="text-sm font-semibold text-slate-900">
-            Authorized Portal Administrators
-          </h2>
+      <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#123c69]" />
+            <h2 className="text-sm font-semibold text-slate-900">
+              Authorized Portal Administrators
+            </h2>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Key in a Google email address manually to authorize another church leader to sign in with Google and manage congregants or mass SMS.
+          </p>
         </div>
-        <div className="space-y-2 text-xs text-slate-600">
+
+        <form onSubmit={handleAddAdminEmail} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div className="md:col-span-5">
+            <label
+              htmlFor="admin-google-email-input"
+              className="block text-xs font-medium text-slate-700 mb-1.5"
+            >
+              Google Email Address
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="admin-google-email-input"
+                type="email"
+                value={adminEmailInput}
+                onChange={(e) => setAdminEmailInput(e.target.value)}
+                maxLength={ADMIN_EMAIL_CONSTRAINTS.emailMax}
+                placeholder="e.g. leader@gmail.com"
+                required
+                className="w-full pl-9 pr-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#123c69]/20 focus:border-[#123c69]"
+              />
+            </div>
+          </div>
+
+          <div className="md:col-span-4">
+            <label
+              htmlFor="admin-google-name-input"
+              className="block text-xs font-medium text-slate-700 mb-1.5"
+            >
+              Name / Role Label (optional)
+            </label>
+            <input
+              id="admin-google-name-input"
+              type="text"
+              value={adminNameInput}
+              onChange={(e) => setAdminNameInput(e.target.value)}
+              maxLength={ADMIN_EMAIL_CONSTRAINTS.displayNameMax}
+              placeholder="e.g. Church Secretary"
+              className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#123c69]/20 focus:border-[#123c69]"
+            />
+          </div>
+
+          <div className="md:col-span-3">
+            <button
+              type="submit"
+              disabled={addingAdminEmail}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#123c69] rounded-lg hover:bg-[#092b4c] disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>{addingAdminEmail ? 'Authorizing...' : 'Authorize Email'}</span>
+            </button>
+          </div>
+        </form>
+
+        {adminEmailError && (
+          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
+            {adminEmailError}
+          </div>
+        )}
+
+        {adminEmailSuccess && (
+          <div className="p-3 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg">
+            {adminEmailSuccess}
+          </div>
+        )}
+
+        <div className="space-y-1 text-xs text-slate-600 pt-1">
           {BOOTSTRAPPED_ADMIN_EMAILS.map((adminEmail) => (
             <div
               key={adminEmail}
-              className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
+              className="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0"
             >
-              <span className="font-medium text-slate-900">{adminEmail}</span>
-              <span className="text-slate-500">Primary Administrator</span>
+              <span className="font-medium text-slate-900 truncate">{adminEmail}</span>
+              <span className="text-slate-500 whitespace-nowrap">Primary Administrator</span>
             </div>
           ))}
+
+          {adminEmails
+            .filter((entry) => !isBootstrappedAdminEmail(entry.email))
+            .map((entry) => {
+              const isSelf = entry.email.toLowerCase() === currentUserEmail;
+              return (
+                <div
+                  key={entry.id}
+                  className="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0"
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium text-slate-900 break-all">
+                      {entry.displayName} · {entry.email}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <span className="text-slate-500 whitespace-nowrap">Authorized Google Email</span>
+                    {!isSelf && (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteEmailTarget(entry)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-700 bg-white border border-slate-200 rounded-md hover:bg-red-50 cursor-pointer whitespace-nowrap"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
           {admins
-            .filter((a) => !isBootstrappedAdminEmail(a.email))
+            .filter(
+              (a) =>
+                !isBootstrappedAdminEmail(a.email) &&
+                !adminEmails.some((e) => e.email.toLowerCase() === a.email.toLowerCase())
+            )
             .map((a) => (
               <div
                 key={a.id}
-                className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
+                className="flex items-center justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0"
               >
-                <span className="font-medium text-slate-900">
+                <span className="font-medium text-slate-900 truncate">
                   {a.displayName} · {a.email}
                 </span>
-                <span className="text-slate-500">Administrator</span>
+                <span className="text-slate-500 whitespace-nowrap">Administrator</span>
               </div>
             ))}
         </div>
@@ -395,6 +571,20 @@ export function AdminNumbersView({
         busy={deleting}
         onConfirm={handleConfirmDelete}
         onCancel={() => !deleting && setDeleteTarget(null)}
+      />
+
+      <ConfirmModal
+        open={Boolean(deleteEmailTarget)}
+        title="Remove Authorized Admin Email"
+        description={
+          deleteEmailTarget
+            ? `Revoke admin portal access for ${deleteEmailTarget.email}? They will no longer be able to sign in as an administrator.`
+            : ''
+        }
+        confirmLabel="Remove Access"
+        busy={deletingEmail}
+        onConfirm={handleConfirmDeleteEmail}
+        onCancel={() => !deletingEmail && setDeleteEmailTarget(null)}
       />
     </div>
   );

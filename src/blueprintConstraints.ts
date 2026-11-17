@@ -22,6 +22,27 @@ export const ADMIN_USER_CONSTRAINTS = {
   idPattern: new RegExp(entities.AdminUser.properties.uid.pattern),
 } as const;
 
+export const ADMIN_EMAIL_CONSTRAINTS = {
+  emailMin: entities.AdminEmail.properties.email.minLength,
+  emailMax: entities.AdminEmail.properties.email.maxLength,
+  emailPattern: new RegExp(entities.AdminEmail.properties.email.pattern),
+  displayNameMin: entities.AdminEmail.properties.displayName.minLength,
+  displayNameMax: entities.AdminEmail.properties.displayName.maxLength,
+} as const;
+
+export function normalizeEmail(rawEmail: string): string {
+  return rawEmail.trim().toLowerCase().slice(0, ADMIN_EMAIL_CONSTRAINTS.emailMax);
+}
+
+export function isValidAdminEmailAddress(email: string): boolean {
+  const normalized = normalizeEmail(email);
+  return (
+    normalized.length >= ADMIN_EMAIL_CONSTRAINTS.emailMin &&
+    normalized.length <= ADMIN_EMAIL_CONSTRAINTS.emailMax &&
+    ADMIN_EMAIL_CONSTRAINTS.emailPattern.test(normalized)
+  );
+}
+
 export const ADMIN_NUMBER_CONSTRAINTS = {
   labelMin: entities.AdminNumber.properties.label.minLength,
   labelMax: entities.AdminNumber.properties.label.maxLength,
