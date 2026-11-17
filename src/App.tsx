@@ -6,7 +6,18 @@ import {
   signOut,
   type User,
 } from 'firebase/auth';
-import { ArrowLeft, Lock, LogIn, LogOut, Mail, ShieldAlert } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  ExternalLink,
+  Lock,
+  LogIn,
+  LogOut,
+  Mail,
+  ShieldAlert,
+} from 'lucide-react';
+import firebaseConfig from '../firebase-applet-config.json';
 import { auth, googleProvider } from './firebase';
 import { isValidAdminEmailAddress, normalizeEmail } from './blueprintConstraints';
 import {
@@ -46,6 +57,8 @@ export function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [unauthorizedHost, setUnauthorizedHost] = useState<string | null>(null);
+  const [copiedHost, setCopiedHost] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [manualGoogleEmail, setManualGoogleEmail] = useState('');
 
@@ -170,6 +183,7 @@ export function App() {
   const handleSignIn = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
+    setUnauthorizedHost(null);
 
     const trimmedEmail = normalizeEmail(manualGoogleEmail);
     if (trimmedEmail && !isValidAdminEmailAddress(trimmedEmail)) {
@@ -190,12 +204,37 @@ export function App() {
         await signInWithPopup(auth, googleProvider);
       }
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Google Sign-In did not complete.'
-      );
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code ?? '')
+          : '';
+      const message = err instanceof Error ? err.message : 'Google Sign-In did not complete.';
+
+      if (code === 'auth/unauthorized-domain' || message.includes('auth/unauthorized-domain')) {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setUnauthorizedHost(host || 'this domain');
+        setAuthError(
+          `This domain (${host || 'current host'}) is not yet listed in Firebase Authorized Domains.`
+        );
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError(
+          'Your browser blocked the Google Sign-In popup. Please allow popups for this site and try again.'
+        );
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError('Google Sign-In window was closed before signing in.');
+      } else {
+        setAuthError(message);
+      }
     } finally {
       setSigningIn(false);
     }
+  };
+
+  const handleCopyHost = async () => {
+    if (!unauthorizedHost || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(unauthorizedHost);
+    setCopiedHost(true);
+    setTimeout(() => setCopiedHost(false), 2000);
   };
 
   const handleSignOut = async () => {
@@ -253,8 +292,35 @@ export function App() {
           </div>
 
           {authError && (
-            <div className="mb-4 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
-              {authError}
+            <div className="mb-4 p-3.5 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg space-y-2.5">
+              <p>{authError}</p>
+              {unauthorizedHost && (
+                <div className="pt-2 border-t border-red-200 text-xs text-slate-700 space-y-2">
+                  <p>
+                    Add <span className="font-mono font-semibold text-slate-900">{unauthorizedHost}</span> in Firebase Console under{' '}
+                    <span className="font-medium">Authentication → Settings → Authorized domains</span>:
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyHost}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-md hover:bg-slate-50 cursor-pointer"
+                    >
+                      {copiedHost ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedHost ? 'Copied domain' : `Copy ${unauthorizedHost}`}</span>
+                    </button>
+                    <a
+                      href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white bg-[#123c69] rounded-md hover:bg-[#092b4c]"
+                    >
+                      <span>Open Firebase Auth Settings</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
