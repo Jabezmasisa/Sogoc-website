@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,6 +243,36 @@ async function sendViaTwilio({ recipients, message, senderNumber }) {
   }
   return results;
 }
+
+const DEFAULT_ADMIN_ACCESS_DIGEST =
+  '41b6a424012a7984dc24f60ab7d42a7d81d79bc87e66d4ceac0c0fafa6670cca';
+
+function matchesAdminSecretPassword(candidate) {
+  const input = String(candidate || '');
+  if (!input) return false;
+  const candidateDigest = crypto.createHash('sha256').update(input).digest();
+  const expectedHex = process.env.ADMIN_ACCESS_PASSWORD
+    ? crypto.createHash('sha256').update(process.env.ADMIN_ACCESS_PASSWORD).digest('hex')
+    : DEFAULT_ADMIN_ACCESS_DIGEST;
+  const expectedDigest = Buffer.from(expectedHex, 'hex');
+  if (candidateDigest.length !== expectedDigest.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(candidateDigest, expectedDigest);
+}
+
+app.post('/api/auth/verify-admin-access', (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  if (!/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/.test(email)) {
+    return res.status(400).json({ ok: false, error: 'Enter a valid administrator email address.' });
+  }
+  if (!matchesAdminSecretPassword(password)) {
+    return res.status(401).json({ ok: false, error: 'Invalid secret password for admin access.' });
+  }
+  return res.json({ ok: true });
+});
 
 app.get('/api/sms/config', (_req, res) => {
   res.json(getSmsGatewayStatus());

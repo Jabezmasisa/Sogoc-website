@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import type { User } from 'firebase/auth';
+import { EmailAuthProvider, linkWithCredential, type User } from 'firebase/auth';
 import {
   Check,
+  KeyRound,
   Mail,
   Pencil,
   Phone,
@@ -11,6 +12,7 @@ import {
   Trash2,
   UserPlus,
 } from 'lucide-react';
+import { verifyAdminSecretPassword } from '../services/authApi';
 import {
   ADMIN_EMAIL_CONSTRAINTS,
   ADMIN_NUMBER_CONSTRAINTS,
@@ -69,6 +71,14 @@ export function AdminNumbersView({
   const [adminEmailSuccess, setAdminEmailSuccess] = useState<string | null>(null);
   const [deleteEmailTarget, setDeleteEmailTarget] = useState<AdminEmailRecord | null>(null);
   const [deletingEmail, setDeletingEmail] = useState(false);
+
+  const [linkPasswordInput, setLinkPasswordInput] = useState('');
+  const [linkingPassword, setLinkingPassword] = useState(false);
+  const [linkPasswordError, setLinkPasswordError] = useState<string | null>(null);
+  const [linkPasswordSuccess, setLinkPasswordSuccess] = useState<string | null>(null);
+  const [hasPasswordProvider, setHasPasswordProvider] = useState(() =>
+    user.providerData.some((p) => p.providerId === 'password')
+  );
 
   const normalizedPreview = normalizePhoneNumber(phoneInput);
   const currentUserEmail = user.email ? normalizeEmail(user.email) : '';
@@ -180,6 +190,39 @@ export function AdminNumbersView({
       setDeleteEmailTarget(null);
     } finally {
       setDeletingEmail(false);
+    }
+  };
+
+  const handleLinkPasswordProvider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLinkPasswordError(null);
+    setLinkPasswordSuccess(null);
+
+    if (!user.email) {
+      setLinkPasswordError('Current account does not have an email address.');
+      return;
+    }
+
+    setLinkingPassword(true);
+    try {
+      const check = await verifyAdminSecretPassword(user.email, linkPasswordInput);
+      if (!check.ok) {
+        setLinkPasswordError(check.error || 'Enter the valid admin secret password.');
+        return;
+      }
+      const credential = EmailAuthProvider.credential(user.email, linkPasswordInput);
+      await linkWithCredential(user, credential);
+      setHasPasswordProvider(true);
+      setLinkPasswordInput('');
+      setLinkPasswordSuccess(
+        `Secret password sign-in is now linked to ${user.email}. You can sign in directly with Email & Password from any domain.`
+      );
+    } catch (err) {
+      setLinkPasswordError(
+        err instanceof Error ? err.message : 'Unable to link password login to this account.'
+      );
+    } finally {
+      setLinkingPassword(false);
     }
   };
 
@@ -555,6 +598,56 @@ export function AdminNumbersView({
               </div>
             ))}
         </div>
+
+        {user.email && (
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div className="flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-[#123c69]" />
+              <h3 className="text-xs font-semibold text-slate-900">
+                Link Secret Password Login ({user.email})
+              </h3>
+            </div>
+            {hasPasswordProvider ? (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                Email & Secret Password sign-in is active on this account ({user.email}).
+              </p>
+            ) : (
+              <form onSubmit={handleLinkPasswordProvider} className="space-y-3">
+                <p className="text-xs text-slate-500">
+                  Signed in with Google? Enter the admin secret password once to attach Email & Password login to your verified account so you can log in from any domain without popups.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="password"
+                    value={linkPasswordInput}
+                    onChange={(e) => setLinkPasswordInput(e.target.value)}
+                    placeholder="Enter admin secret password"
+                    required
+                    className="flex-1 px-3.5 py-2 text-sm text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#123c69]/20 focus:border-[#123c69]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={linkingPassword}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium text-white bg-[#123c69] rounded-lg hover:bg-[#092b4c] disabled:opacity-60 cursor-pointer whitespace-nowrap"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>{linkingPassword ? 'Linking...' : 'Enable Password Login'}</span>
+                  </button>
+                </div>
+                {linkPasswordError && (
+                  <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2.5">
+                    {linkPasswordError}
+                  </p>
+                )}
+              </form>
+            )}
+            {linkPasswordSuccess && (
+              <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                {linkPasswordSuccess}
+              </p>
+            )}
+          </div>
+        )}
       </section>
 
       <ConfirmModal
