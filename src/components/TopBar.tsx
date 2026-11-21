@@ -11,6 +11,7 @@ interface TopBarProps {
 
 const SECTION_TITLES: Record<AdminNavSection, string> = {
   overview: 'Overview',
+  registrations: 'Registrations & Auto-SMS',
   congregants: 'Congregants',
   'mass-sms': 'Mass SMS',
   'admin-numbers': 'Admin Numbers',

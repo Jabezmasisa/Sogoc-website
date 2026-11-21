@@ -6,6 +6,7 @@ import {
   Copy,
   Phone,
   Send,
+  Sparkles,
   Users,
 } from 'lucide-react';
 import {
@@ -268,7 +269,7 @@ export function MassSmsView({
               Target Congregants
             </span>
             <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-lg">
-              {SMS_CAMPAIGN_CONSTRAINTS.targetFilters.map((filter) => (
+              {(['All', 'Male', 'Female', 'Other', 'Custom'] as TargetFilter[]).map((filter) => (
                 <button
                   key={filter}
                   type="button"
@@ -504,6 +505,25 @@ export function MassSmsView({
                 )}
               </ul>
             )}
+          </div>
+
+          <div className="pt-4 border-t border-slate-200">
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-900">
+                <Sparkles className="w-3.5 h-3.5 text-[#123c69]" />
+                <span>Automated Welcome SMS</span>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Want new congregants to receive an automatic welcome text right when approved?
+              </p>
+              <button
+                type="button"
+                onClick={() => onNavigate('registrations')}
+                className="text-xs font-medium text-[#123c69] hover:underline cursor-pointer"
+              >
+                Configure Automated Welcome SMS →
+              </button>
+            </div>
           </div>
         </aside>
       </div>

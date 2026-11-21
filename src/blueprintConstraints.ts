@@ -71,6 +71,30 @@ export const SMS_CAMPAIGN_CONSTRAINTS = {
   targetFilters: entities.SmsCampaign.properties.targetFilter.enum as TargetFilter[],
 } as const;
 
+export const REGISTRATION_CONSTRAINTS = {
+  nameMin: entities.CongregantRegistration.properties.name.minLength,
+  nameMax: entities.CongregantRegistration.properties.name.maxLength,
+  notesMax: entities.CongregantRegistration.properties.notes.maxLength,
+  genders: entities.CongregantRegistration.properties.gender.enum as Gender[],
+  phoneMin: entities.CongregantRegistration.properties.phoneNumber.minLength,
+  phoneMax: entities.CongregantRegistration.properties.phoneNumber.maxLength,
+} as const;
+
+export const AUTOMATION_CONSTRAINTS = {
+  templateMin: entities.AutomationSetting.properties.messageTemplate.minLength,
+  templateMax: entities.AutomationSetting.properties.messageTemplate.maxLength,
+  senderLabelMax: entities.AutomationSetting.properties.senderLabel.maxLength,
+} as const;
+
+export const DEFAULT_WELCOME_SMS_TEMPLATE =
+  'Karibu JCC Sondu, {name}! Your congregant registration at Sondu Gospel Centre has been approved. Join us Sundays for worship and fellowship.';
+
+export function renderWelcomeSmsMessage(template: string, congregantName: string): string {
+  const cleanName = congregantName.trim() || 'Friend';
+  const rendered = template.replace(/\{name\}/gi, cleanName).trim();
+  return rendered.slice(0, AUTOMATION_CONSTRAINTS.templateMax);
+}
+
 /**
  * Normalizes Kenyan local numbers (e.g. 0722627135, 0112345678, 254722627135)
  * or international numbers into strict E.164 format (+[country][number]).

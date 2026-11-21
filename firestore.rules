@@ -144,7 +144,7 @@ service cloud.firestore {
         data.senderNumber.matches('^\\+[1-9][0-9]{6,14}$') &&
         data.senderLabel is string && data.senderLabel.size() >= 1 && data.senderLabel.size() <= 80 &&
         data.message is string && data.message.size() >= 1 && data.message.size() <= 640 &&
-        data.targetFilter in ['All', 'Male', 'Female', 'Other', 'Custom'] &&
+        data.targetFilter in ['All', 'Male', 'Female', 'Other', 'Custom', 'New Congregant'] &&
         data.recipientCount is int && data.recipientCount >= 1 && data.recipientCount <= 50000 &&
         data.sentCount is int && data.sentCount >= 0 && data.sentCount <= data.recipientCount &&
         data.failedCount is int && data.failedCount >= 0 && data.failedCount <= data.recipientCount &&
@@ -174,6 +174,54 @@ service cloud.firestore {
         data.providerMessageId is string && data.providerMessageId.size() <= 128 &&
         data.error is string && data.error.size() <= 300 &&
         data.createdAt is timestamp;
+    }
+
+    function isValidCongregantRegistration(data) {
+      return data.keys().hasAll([
+          'name', 'gender', 'phoneNumber', 'notes', 'status',
+          'congregantId', 'reviewedBy', 'reviewedByEmail', 'welcomeSmsStatus',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'gender', 'phoneNumber', 'notes', 'status',
+          'congregantId', 'reviewedBy', 'reviewedByEmail', 'welcomeSmsStatus',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.gender in ['Male', 'Female', 'Other'] &&
+        data.phoneNumber is string && data.phoneNumber.size() >= 8 && data.phoneNumber.size() <= 20 &&
+        data.phoneNumber.matches('^\\+[1-9][0-9]{6,14}$') &&
+        data.notes is string && data.notes.size() <= 240 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.congregantId is string && data.congregantId.size() <= 128 &&
+        (data.congregantId == '' || isValidId(data.congregantId)) &&
+        data.reviewedBy is string && data.reviewedBy.size() <= 128 &&
+        (data.reviewedBy == '' || isValidId(data.reviewedBy)) &&
+        data.reviewedByEmail is string && data.reviewedByEmail.size() <= 254 &&
+        data.welcomeSmsStatus in ['not_sent', 'sent', 'failed'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAutomationSetting(data) {
+      return data.keys().hasAll([
+          'enabled', 'autoSendOnManualAdd', 'senderNumber', 'senderLabel',
+          'messageTemplate', 'updatedBy', 'updatedByEmail', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'enabled', 'autoSendOnManualAdd', 'senderNumber', 'senderLabel',
+          'messageTemplate', 'updatedBy', 'updatedByEmail', 'createdAt', 'updatedAt'
+        ]) &&
+        data.enabled is bool &&
+        data.autoSendOnManualAdd is bool &&
+        data.senderNumber is string && data.senderNumber.size() <= 20 &&
+        (data.senderNumber == '' || data.senderNumber.matches('^\\+[1-9][0-9]{6,14}$')) &&
+        data.senderLabel is string && data.senderLabel.size() <= 80 &&
+        data.messageTemplate is string && data.messageTemplate.size() >= 1 && data.messageTemplate.size() <= 640 &&
+        isValidId(data.updatedBy) &&
+        data.updatedByEmail is string && data.updatedByEmail.size() >= 5 && data.updatedByEmail.size() <= 254 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
     }
 
     // -------------------------------------------------------------------------
@@ -271,6 +319,57 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'gender', 'phoneNumber', 'updatedAt']) &&
         isAdmin();
       allow delete: if isValidId(congregantId) && isAdmin();
+    }
+
+    match /congregantRegistrations/{registrationId} {
+      allow get: if isValidId(registrationId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(registrationId) &&
+        isValidCongregantRegistration(incoming()) &&
+        incoming().status == 'pending' &&
+        incoming().congregantId == '' &&
+        incoming().reviewedBy == '' &&
+        incoming().reviewedByEmail == '' &&
+        incoming().welcomeSmsStatus == 'not_sent' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(registrationId) &&
+        isVerifiedUser() &&
+        isValidCongregantRegistration(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (incoming().status == 'pending' || incoming().reviewedBy == request.auth.uid || incoming().reviewedBy == existing().reviewedBy) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'gender', 'phoneNumber', 'notes', 'status',
+          'congregantId', 'reviewedBy', 'reviewedByEmail',
+          'welcomeSmsStatus', 'updatedAt'
+        ]) &&
+        isAdmin();
+      allow delete: if isValidId(registrationId) && isAdmin();
+    }
+
+    match /automationSettings/{settingId} {
+      allow get: if isValidId(settingId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(settingId) &&
+        isVerifiedUser() &&
+        isValidAutomationSetting(incoming()) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isValidId(settingId) &&
+        isVerifiedUser() &&
+        isValidAutomationSetting(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'enabled', 'autoSendOnManualAdd', 'senderNumber', 'senderLabel',
+          'messageTemplate', 'updatedBy', 'updatedByEmail', 'updatedAt'
+        ]) &&
+        isAdmin();
+      allow delete: if isValidId(settingId) && isAdmin();
     }
 
     match /smsCampaigns/{campaignId} {

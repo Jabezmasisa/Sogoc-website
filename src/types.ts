@@ -1,12 +1,15 @@
 import type { Timestamp } from 'firebase/firestore';
 
 export type Gender = 'Male' | 'Female' | 'Other';
-export type TargetFilter = 'All' | 'Male' | 'Female' | 'Other' | 'Custom';
+export type TargetFilter = 'All' | 'Male' | 'Female' | 'Other' | 'Custom' | 'New Congregant';
 export type CampaignStatus = 'sent' | 'partial' | 'failed';
 export type RecipientStatus = 'sent' | 'failed';
+export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
+export type WelcomeSmsStatus = 'not_sent' | 'sent' | 'failed';
 
 export type AdminNavSection =
   | 'overview'
+  | 'registrations'
   | 'congregants'
   | 'mass-sms'
   | 'admin-numbers'
@@ -48,6 +51,33 @@ export interface CongregantRecord {
   gender: Gender;
   phoneNumber: string;
   createdBy: string;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
+export interface CongregantRegistrationRecord {
+  id: string;
+  name: string;
+  gender: Gender;
+  phoneNumber: string;
+  notes: string;
+  status: RegistrationStatus;
+  congregantId: string;
+  reviewedBy: string;
+  reviewedByEmail: string;
+  welcomeSmsStatus: WelcomeSmsStatus;
+  createdAt: Timestamp | null;
+  updatedAt: Timestamp | null;
+}
+
+export interface WelcomeAutomationConfig {
+  enabled: boolean;
+  autoSendOnManualAdd: boolean;
+  senderNumber: string;
+  senderLabel: string;
+  messageTemplate: string;
+  updatedBy: string;
+  updatedByEmail: string;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
 }

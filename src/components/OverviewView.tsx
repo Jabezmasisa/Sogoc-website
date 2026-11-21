@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   CheckCircle2,
+  ClipboardCheck,
   MessageSquare,
   Phone,
   UserPlus,
@@ -11,12 +12,16 @@ import type {
   AdminNavSection,
   AdminNumberRecord,
   CongregantRecord,
+  CongregantRegistrationRecord,
   SmsCampaignRecord,
   SmsGatewayConfig,
+  WelcomeAutomationConfig,
 } from '../types';
 
 interface OverviewViewProps {
   congregants: CongregantRecord[];
+  pendingRegistrations: CongregantRegistrationRecord[];
+  welcomeAutomation: WelcomeAutomationConfig | null;
   adminNumbers: AdminNumberRecord[];
   campaigns: SmsCampaignRecord[];
   smsConfig: SmsGatewayConfig;
@@ -27,6 +32,8 @@ interface OverviewViewProps {
 
 export function OverviewView({
   congregants,
+  pendingRegistrations,
+  welcomeAutomation,
   adminNumbers,
   campaigns,
   smsConfig,
@@ -45,6 +52,33 @@ export function OverviewView({
 
   return (
     <div className="space-y-6">
+      {!loading && pendingRegistrations.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <ClipboardCheck className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-900">
+                {pendingRegistrations.length} new congregant{' '}
+                {pendingRegistrations.length === 1 ? 'registration' : 'registrations'} awaiting admin approval
+              </p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Review submitted details to approve into the Congregants directory
+                {welcomeAutomation?.enabled
+                  ? ' and automatically send a welcome SMS.'
+                  : ' or configure automated welcome SMS.'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('registrations')}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-[#123c69] rounded-lg hover:bg-[#092b4c] transition-colors cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-center"
+          >
+            <span>Review &amp; Approve</span>
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">

@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  ClipboardCheck,
   History,
   LayoutDashboard,
   LogOut,
@@ -16,6 +17,7 @@ interface SidebarProps {
   onSignOut: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  pendingRegistrationCount: number;
   congregantCount: number;
   adminNumberCount: number;
 }
@@ -26,6 +28,7 @@ const NAV_ITEMS: Array<{
   icon: typeof LayoutDashboard;
 }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'registrations', label: 'Registrations', icon: ClipboardCheck },
   { id: 'congregants', label: 'Congregants', icon: Users },
   { id: 'mass-sms', label: 'Mass SMS', icon: MessageSquare },
   { id: 'admin-numbers', label: 'Admin Numbers', icon: Phone },
@@ -38,10 +41,12 @@ export function Sidebar({
   onSignOut,
   mobileOpen,
   onCloseMobile,
+  pendingRegistrationCount,
   congregantCount,
   adminNumberCount,
 }: SidebarProps) {
   const getCount = (id: AdminNavSection): number | null => {
+    if (id === 'registrations') return pendingRegistrationCount;
     if (id === 'congregants') return congregantCount;
     if (id === 'admin-numbers') return adminNumberCount;
     return null;
@@ -71,6 +76,7 @@ export function Sidebar({
           const Icon = item.icon;
           const isActive = activeSection === item.id;
           const count = getCount(item.id);
+          const isPendingAlert = item.id === 'registrations' && (count ?? 0) > 0;
           return (
             <button
               key={item.id}
@@ -92,7 +98,11 @@ export function Sidebar({
               {count !== null && (
                 <span
                   className={`font-mono-tabular text-xs shrink-0 ${
-                    isActive ? 'text-slate-200' : 'text-slate-500'
+                    isPendingAlert && !isActive
+                      ? 'px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold'
+                      : isActive
+                      ? 'text-slate-200'
+                      : 'text-slate-500'
                   }`}
                 >
                   {count}

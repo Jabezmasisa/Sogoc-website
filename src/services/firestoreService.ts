@@ -20,12 +20,14 @@ import {
   ADMIN_EMAIL_CONSTRAINTS,
   ADMIN_NUMBER_CONSTRAINTS,
   ADMIN_USER_CONSTRAINTS,
+  AUTOMATION_CONSTRAINTS,
   CONGREGANT_CONSTRAINTS,
   isBootstrappedAdminEmail,
   isValidAdminEmailAddress,
   isValidPhoneNumber,
   normalizeEmail,
   normalizePhoneNumber,
+  REGISTRATION_CONSTRAINTS,
   sanitizeBoundedText,
   sanitizeMessageText,
   SMS_CAMPAIGN_CONSTRAINTS,
@@ -36,11 +38,15 @@ import type {
   AdminUserRecord,
   CampaignStatus,
   CongregantRecord,
+  CongregantRegistrationRecord,
   Gender,
+  RegistrationStatus,
   SmsCampaignRecipientRecord,
   SmsCampaignRecord,
   SmsDispatchResultItem,
   TargetFilter,
+  WelcomeAutomationConfig,
+  WelcomeSmsStatus,
 } from '../types';
 
 export async function hasAdminPassSession(uid: string): Promise<boolean> {
@@ -632,5 +638,252 @@ export async function deleteAdminEmail(emailId: string): Promise<void> {
     await deleteDoc(doc(db, 'adminEmails', normalized));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeCongregantRegistrations(
+  onData: (items: CongregantRegistrationRecord[]) => void,
+  onError: (err: Error) => void
+): Unsubscribe {
+  const path = 'congregantRegistrations';
+  const q = query(collection(db, path), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const records: CongregantRegistrationRecord[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: String(data.name ?? ''),
+          gender: (data.gender as Gender) ?? 'Other',
+          phoneNumber: String(data.phoneNumber ?? ''),
+          notes: String(data.notes ?? ''),
+          status: (data.status as RegistrationStatus) ?? 'pending',
+          congregantId: String(data.congregantId ?? ''),
+          reviewedBy: String(data.reviewedBy ?? ''),
+          reviewedByEmail: String(data.reviewedByEmail ?? ''),
+          welcomeSmsStatus: (data.welcomeSmsStatus as WelcomeSmsStatus) ?? 'not_sent',
+          createdAt: data.createdAt ?? null,
+          updatedAt: data.updatedAt ?? null,
+        };
+      });
+      onData(records);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export async function approveCongregantRegistration(
+  registration: CongregantRegistrationRecord,
+  adminUser: User,
+  overrides?: { name?: string; gender?: Gender; phoneNumber?: string; notes?: string }
+): Promise<{ congregantId: string; name: string; gender: Gender; phoneNumber: string }> {
+  const name = sanitizeBoundedText(
+    overrides?.name ?? registration.name,
+    CONGREGANT_CONSTRAINTS.nameMax
+  );
+  const gender = overrides?.gender ?? registration.gender;
+  const phoneNumber = normalizePhoneNumber(overrides?.phoneNumber ?? registration.phoneNumber);
+  const notes = sanitizeBoundedText(
+    overrides?.notes ?? registration.notes,
+    REGISTRATION_CONSTRAINTS.notesMax
+  );
+
+  if (name.length < CONGREGANT_CONSTRAINTS.nameMin) {
+    throw new Error('Congregant name is required.');
+  }
+  if (!CONGREGANT_CONSTRAINTS.genders.includes(gender)) {
+    throw new Error('Select a valid gender (Male, Female, or Other).');
+  }
+  if (!isValidPhoneNumber(phoneNumber)) {
+    throw new Error('Enter a valid phone number (e.g., 0722627135 or +254722627135).');
+  }
+
+  const reviewedByEmail = (adminUser.email ?? 'admin@jccsondu.org').slice(
+    0,
+    ADMIN_USER_CONSTRAINTS.emailMax
+  );
+  const path = `congregantRegistrations/${registration.id}`;
+
+  try {
+    const batch = writeBatch(db);
+    const congregantRef = doc(collection(db, 'congregants'));
+    batch.set(congregantRef, {
+      name,
+      gender,
+      phoneNumber,
+      createdBy: adminUser.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, 'congregantRegistrations', registration.id), {
+      name,
+      gender,
+      phoneNumber,
+      notes,
+      status: 'approved',
+      congregantId: congregantRef.id,
+      reviewedBy: adminUser.uid,
+      reviewedByEmail,
+      updatedAt: serverTimestamp(),
+    });
+    await batch.commit();
+    return { congregantId: congregantRef.id, name, gender, phoneNumber };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function updateRegistrationWelcomeStatus(
+  registrationId: string,
+  welcomeSmsStatus: WelcomeSmsStatus
+): Promise<void> {
+  const path = `congregantRegistrations/${registrationId}`;
+  try {
+    await updateDoc(doc(db, 'congregantRegistrations', registrationId), {
+      welcomeSmsStatus,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function rejectCongregantRegistration(
+  registrationId: string,
+  adminUser: User
+): Promise<void> {
+  const path = `congregantRegistrations/${registrationId}`;
+  const reviewedByEmail = (adminUser.email ?? 'admin@jccsondu.org').slice(
+    0,
+    ADMIN_USER_CONSTRAINTS.emailMax
+  );
+  try {
+    await updateDoc(doc(db, 'congregantRegistrations', registrationId), {
+      status: 'rejected',
+      reviewedBy: adminUser.uid,
+      reviewedByEmail,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteCongregantRegistration(registrationId: string): Promise<void> {
+  const path = `congregantRegistrations/${registrationId}`;
+  try {
+    await deleteDoc(doc(db, 'congregantRegistrations', registrationId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+const WELCOME_AUTOMATION_DOC_ID = 'newCongregantSms';
+
+export function subscribeWelcomeAutomation(
+  onData: (config: WelcomeAutomationConfig | null) => void,
+  onError: (err: Error) => void
+): Unsubscribe {
+  const path = `automationSettings/${WELCOME_AUTOMATION_DOC_ID}`;
+  return onSnapshot(
+    doc(db, 'automationSettings', WELCOME_AUTOMATION_DOC_ID),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      const data = snap.data();
+      onData({
+        enabled: Boolean(data.enabled),
+        autoSendOnManualAdd: Boolean(data.autoSendOnManualAdd),
+        senderNumber: String(data.senderNumber ?? ''),
+        senderLabel: String(data.senderLabel ?? ''),
+        messageTemplate: String(data.messageTemplate ?? ''),
+        updatedBy: String(data.updatedBy ?? ''),
+        updatedByEmail: String(data.updatedByEmail ?? ''),
+        createdAt: data.createdAt ?? null,
+        updatedAt: data.updatedAt ?? null,
+      });
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export async function saveWelcomeAutomation(
+  input: {
+    enabled: boolean;
+    autoSendOnManualAdd: boolean;
+    senderNumber: string;
+    senderLabel: string;
+    messageTemplate: string;
+  },
+  adminUser: User,
+  existingConfig: WelcomeAutomationConfig | null
+): Promise<void> {
+  const messageTemplate = sanitizeMessageText(
+    input.messageTemplate,
+    AUTOMATION_CONSTRAINTS.templateMax
+  );
+  if (messageTemplate.length < AUTOMATION_CONSTRAINTS.templateMin) {
+    throw new Error('Automated welcome message text is required.');
+  }
+
+  const rawSender = input.senderNumber.trim();
+  const senderNumber = rawSender ? normalizePhoneNumber(rawSender) : '';
+  if (senderNumber && !isValidPhoneNumber(senderNumber)) {
+    throw new Error('Selected admin sender number is invalid.');
+  }
+
+  const senderLabel = sanitizeBoundedText(
+    input.senderLabel,
+    AUTOMATION_CONSTRAINTS.senderLabelMax
+  );
+  const updatedByEmail = (adminUser.email ?? 'admin@jccsondu.org').slice(
+    0,
+    ADMIN_USER_CONSTRAINTS.emailMax
+  );
+
+  const path = `automationSettings/${WELCOME_AUTOMATION_DOC_ID}`;
+  const ref = doc(db, 'automationSettings', WELCOME_AUTOMATION_DOC_ID);
+  try {
+    if (existingConfig) {
+      await updateDoc(ref, {
+        enabled: input.enabled,
+        autoSendOnManualAdd: input.autoSendOnManualAdd,
+        senderNumber,
+        senderLabel,
+        messageTemplate,
+        updatedBy: adminUser.uid,
+        updatedByEmail,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        enabled: input.enabled,
+        autoSendOnManualAdd: input.autoSendOnManualAdd,
+        senderNumber,
+        senderLabel,
+        messageTemplate,
+        updatedBy: adminUser.uid,
+        updatedByEmail,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }

@@ -293,6 +293,143 @@ app.get('/api/sms/config', (_req, res) => {
   res.json(getSmsGatewayStatus());
 });
 
+const registrationRateBuckets = new Map();
+const REGISTRATION_WINDOW_MS = 15 * 60 * 1000;
+const REGISTRATION_MAX_PER_WINDOW = 12;
+
+function isRegistrationRateLimited(ipKey) {
+  const now = Date.now();
+  if (registrationRateBuckets.size > 500) {
+    for (const [key, entries] of registrationRateBuckets.entries()) {
+      const fresh = entries.filter((ts) => now - ts < REGISTRATION_WINDOW_MS);
+      if (fresh.length === 0) registrationRateBuckets.delete(key);
+      else registrationRateBuckets.set(key, fresh);
+    }
+  }
+  const history = (registrationRateBuckets.get(ipKey) || []).filter(
+    (ts) => now - ts < REGISTRATION_WINDOW_MS
+  );
+  if (history.length >= REGISTRATION_MAX_PER_WINDOW) {
+    registrationRateBuckets.set(ipKey, history);
+    return true;
+  }
+  history.push(now);
+  registrationRateBuckets.set(ipKey, history);
+  return false;
+}
+
+app.post('/api/registrations', async (req, res) => {
+  try {
+    // Silent honeypot drop for automated bots
+    if (String(req.body?.website || '').trim() !== '') {
+      return res.status(201).json({
+        ok: true,
+        message: 'Registration received and awaiting administrator approval.',
+      });
+    }
+
+    const forwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const ipKey = forwardedFor || req.ip || 'unknown';
+    if (isRegistrationRateLimited(ipKey)) {
+      return res.status(429).json({
+        ok: false,
+        error: 'Too many registration requests from this device. Please try again in a few minutes.',
+      });
+    }
+
+    const name = String(req.body?.name || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 120);
+    const gender = String(req.body?.gender || '').trim();
+    const phoneNumber = normalizePhone(req.body?.phoneNumber).slice(0, 20);
+    const notes = String(req.body?.notes || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 240);
+
+    if (name.length < 2) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Please enter your full name.',
+      });
+    }
+    if (!['Male', 'Female', 'Other'].includes(gender)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Please select a valid gender option.',
+      });
+    }
+    if (!/^\+[1-9][0-9]{6,14}$/.test(phoneNumber) || phoneNumber.length < 8) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Please enter a valid phone number (e.g. 0722 627 135 or +254722627135).',
+      });
+    }
+
+    const registrationId = `reg_${crypto.randomBytes(12).toString('hex')}`;
+    const docName = `projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/congregantRegistrations/${registrationId}`;
+    const commitUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+      firebaseConfig.projectId
+    )}/databases/${encodeURIComponent(
+      firebaseConfig.firestoreDatabaseId
+    )}/documents:commit?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+
+    const firestoreRes = await fetch(commitUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: docName,
+              fields: {
+                name: { stringValue: name },
+                gender: { stringValue: gender },
+                phoneNumber: { stringValue: phoneNumber },
+                notes: { stringValue: notes },
+                status: { stringValue: 'pending' },
+                congregantId: { stringValue: '' },
+                reviewedBy: { stringValue: '' },
+                reviewedByEmail: { stringValue: '' },
+                welcomeSmsStatus: { stringValue: 'not_sent' },
+              },
+            },
+            currentDocument: { exists: false },
+            updateTransforms: [
+              { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
+              { fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!firestoreRes.ok) {
+      const errBody = await firestoreRes.json().catch(() => ({}));
+      const detail = errBody?.error?.message || `HTTP ${firestoreRes.status}`;
+      console.error('Firestore registration commit error:', detail);
+      return res.status(502).json({
+        ok: false,
+        error: 'Unable to submit your registration right now. Please try again shortly.',
+      });
+    }
+
+    return res.status(201).json({
+      ok: true,
+      id: registrationId,
+      message:
+        'Thank you! Your registration has been received and will be reviewed by a JCC Sondu administrator.',
+    });
+  } catch (err) {
+    console.error('Registration endpoint error:', err);
+    return res.status(500).json({
+      ok: false,
+      error: 'Unexpected error submitting registration.',
+    });
+  }
+});
+
 app.post('/api/sms/send', async (req, res) => {
   try {
     const authResult = await verifyAdminBearerToken(req.headers.authorization);

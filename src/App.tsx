@@ -25,34 +25,47 @@ import {
 } from 'lucide-react';
 import firebaseConfig from '../firebase-applet-config.json';
 import { auth, googleProvider } from './firebase';
-import { isValidAdminEmailAddress, normalizeEmail } from './blueprintConstraints';
+import {
+  DEFAULT_WELCOME_SMS_TEMPLATE,
+  isValidAdminEmailAddress,
+  normalizeEmail,
+  renderWelcomeSmsMessage,
+} from './blueprintConstraints';
 import {
   createCongregant,
   deleteCongregant,
   ensureAdminPassSession,
+  logSmsCampaign,
   subscribeAdminEmails,
   subscribeAdminNumbers,
   subscribeAdmins,
+  subscribeCongregantRegistrations,
   subscribeCongregants,
   subscribeSmsCampaigns,
+  subscribeWelcomeAutomation,
   updateCongregant,
+  updateRegistrationWelcomeStatus,
   verifyUserIsAdmin,
 } from './services/firestoreService';
 import { verifyAdminSecretPassword } from './services/authApi';
-import { fetchSmsGatewayConfig } from './services/smsApi';
+import { dispatchMassSms, fetchSmsGatewayConfig } from './services/smsApi';
 import type {
   AdminEmailRecord,
   AdminNavSection,
   AdminNumberRecord,
   AdminUserRecord,
   CongregantRecord,
+  CongregantRegistrationRecord,
   Gender,
   SmsCampaignRecord,
+  SmsDispatchResponse,
   SmsGatewayConfig,
+  WelcomeAutomationConfig,
 } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { OverviewView } from './components/OverviewView';
+import { RegistrationsView } from './components/RegistrationsView';
 import { CongregantsView } from './components/CongregantsView';
 import { MassSmsView } from './components/MassSmsView';
 import { AdminNumbersView } from './components/AdminNumbersView';
@@ -81,6 +94,8 @@ export function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [congregants, setCongregants] = useState<CongregantRecord[]>([]);
+  const [registrations, setRegistrations] = useState<CongregantRegistrationRecord[]>([]);
+  const [welcomeAutomation, setWelcomeAutomation] = useState<WelcomeAutomationConfig | null>(null);
   const [adminNumbers, setAdminNumbers] = useState<AdminNumberRecord[]>([]);
   const [campaigns, setCampaigns] = useState<SmsCampaignRecord[]>([]);
   const [admins, setAdmins] = useState<AdminUserRecord[]>([]);
@@ -140,6 +155,8 @@ export function App() {
   useEffect(() => {
     if (!authReady || !user || !isAdmin) {
       setCongregants([]);
+      setRegistrations([]);
+      setWelcomeAutomation(null);
       setAdminNumbers([]);
       setCampaigns([]);
       setAdmins([]);
@@ -149,10 +166,10 @@ export function App() {
     }
 
     setDataLoading(true);
-    let loadedFlags = { c: false, n: false, s: false };
-    const markLoaded = (key: 'c' | 'n' | 's') => {
+    let loadedFlags = { c: false, n: false, s: false, r: false };
+    const markLoaded = (key: 'c' | 'n' | 's' | 'r') => {
       loadedFlags = { ...loadedFlags, [key]: true };
-      if (loadedFlags.c && loadedFlags.n && loadedFlags.s) {
+      if (loadedFlags.c && loadedFlags.n && loadedFlags.s && loadedFlags.r) {
         setDataLoading(false);
       }
     };
@@ -162,6 +179,19 @@ export function App() {
         setCongregants(items);
         markLoaded('c');
       },
+      (err) => setFatalDataError(err)
+    );
+
+    const unsubRegistrations = subscribeCongregantRegistrations(
+      (items) => {
+        setRegistrations(items);
+        markLoaded('r');
+      },
+      (err) => setFatalDataError(err)
+    );
+
+    const unsubWelcomeAuto = subscribeWelcomeAutomation(
+      (config) => setWelcomeAutomation(config),
       (err) => setFatalDataError(err)
     );
 
@@ -195,6 +225,8 @@ export function App() {
 
     return () => {
       unsubCongregants();
+      unsubRegistrations();
+      unsubWelcomeAuto();
       unsubNumbers();
       unsubCampaigns();
       unsubAdmins();
@@ -391,16 +423,109 @@ export function App() {
     setActiveSection('overview');
   };
 
+  const handleSendWelcomeSms = async (params: {
+    congregantId: string;
+    name: string;
+    phoneNumber: string;
+    registrationId?: string;
+    senderNumberOverride?: string;
+    senderLabelOverride?: string;
+    templateOverride?: string;
+  }): Promise<SmsDispatchResponse> => {
+    if (!user) {
+      throw new Error('Administrator session required.');
+    }
+    const defaultNumber =
+      adminNumbers.find((n) => n.isDefault) ?? adminNumbers[0] ?? null;
+    const senderNumber =
+      params.senderNumberOverride ||
+      welcomeAutomation?.senderNumber ||
+      defaultNumber?.phoneNumber ||
+      '';
+    const matchedSender = adminNumbers.find((n) => n.phoneNumber === senderNumber);
+    const senderLabel =
+      params.senderLabelOverride ||
+      matchedSender?.label ||
+      welcomeAutomation?.senderLabel ||
+      defaultNumber?.label ||
+      'Admin Line';
+
+    if (!senderNumber) {
+      throw new Error('Add an Admin Sender Number before dispatching welcome SMS.');
+    }
+
+    const template =
+      params.templateOverride ||
+      welcomeAutomation?.messageTemplate ||
+      DEFAULT_WELCOME_SMS_TEMPLATE;
+    const bodyText = renderWelcomeSmsMessage(template, params.name);
+
+    const response = await dispatchMassSms({
+      user,
+      senderNumber,
+      message: bodyText,
+      recipients: [
+        {
+          id: params.congregantId,
+          name: params.name,
+          phoneNumber: params.phoneNumber,
+        },
+      ],
+    });
+
+    await logSmsCampaign({
+      senderNumber,
+      senderLabel,
+      message: bodyText,
+      targetFilter: 'New Congregant',
+      sentCount: response.sentCount,
+      failedCount: response.failedCount,
+      status: response.status,
+      provider: response.provider,
+      errorMessage: response.errorMessage,
+      results: response.results,
+      user,
+    });
+
+    if (params.registrationId) {
+      await updateRegistrationWelcomeStatus(
+        params.registrationId,
+        response.ok && response.status === 'sent' ? 'sent' : 'failed'
+      );
+    }
+
+    return response;
+  };
+
   const handleSaveCongregant = async (payload: {
     name: string;
     gender: Gender;
     phoneNumber: string;
+    sendWelcomeSms?: boolean;
   }) => {
     if (!user) return;
     if (editingCongregant) {
-      await updateCongregant(editingCongregant.id, payload);
+      await updateCongregant(editingCongregant.id, {
+        name: payload.name,
+        gender: payload.gender,
+        phoneNumber: payload.phoneNumber,
+      });
     } else {
-      await createCongregant(payload, user.uid);
+      const newId = await createCongregant(
+        {
+          name: payload.name,
+          gender: payload.gender,
+          phoneNumber: payload.phoneNumber,
+        },
+        user.uid
+      );
+      if (payload.sendWelcomeSms) {
+        await handleSendWelcomeSms({
+          congregantId: newId,
+          name: payload.name,
+          phoneNumber: payload.phoneNumber,
+        });
+      }
     }
   };
 
@@ -702,6 +827,8 @@ export function App() {
     );
   }
 
+  const pendingRegistrations = registrations.filter((r) => r.status === 'pending');
+
   return (
     <div className="min-h-screen bg-slate-50 flex">
       <Sidebar
@@ -710,6 +837,7 @@ export function App() {
         onSignOut={handleSignOut}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
+        pendingRegistrationCount={pendingRegistrations.length}
         congregantCount={congregants.length}
         adminNumberCount={adminNumbers.length}
       />
@@ -730,6 +858,8 @@ export function App() {
           {activeSection === 'overview' && (
             <OverviewView
               congregants={congregants}
+              pendingRegistrations={pendingRegistrations}
+              welcomeAutomation={welcomeAutomation}
               adminNumbers={adminNumbers}
               campaigns={campaigns}
               smsConfig={smsConfig}
@@ -739,6 +869,19 @@ export function App() {
                 setEditingCongregant(null);
                 setCongregantModalOpen(true);
               }}
+            />
+          )}
+
+          {activeSection === 'registrations' && (
+            <RegistrationsView
+              user={user}
+              registrations={registrations}
+              adminNumbers={adminNumbers}
+              welcomeAutomation={welcomeAutomation}
+              smsConfig={smsConfig}
+              loading={dataLoading}
+              onNavigate={setActiveSection}
+              onSendWelcomeSms={handleSendWelcomeSms}
             />
           )}
 
@@ -797,6 +940,8 @@ export function App() {
       <CongregantModal
         open={congregantModalOpen}
         editingRecord={editingCongregant}
+        defaultSendWelcomeSms={Boolean(welcomeAutomation?.autoSendOnManualAdd)}
+        hasSenderNumber={adminNumbers.length > 0}
         onClose={() => setCongregantModalOpen(false)}
         onSave={handleSaveCongregant}
       />

@@ -11,19 +11,29 @@ import type { CongregantRecord, Gender } from '../types';
 interface CongregantModalProps {
   open: boolean;
   editingRecord: CongregantRecord | null;
+  defaultSendWelcomeSms?: boolean;
+  hasSenderNumber?: boolean;
   onClose: () => void;
-  onSave: (data: { name: string; gender: Gender; phoneNumber: string }) => Promise<void>;
+  onSave: (data: {
+    name: string;
+    gender: Gender;
+    phoneNumber: string;
+    sendWelcomeSms?: boolean;
+  }) => Promise<void>;
 }
 
 export function CongregantModal({
   open,
   editingRecord,
+  defaultSendWelcomeSms = false,
+  hasSenderNumber = false,
   onClose,
   onSave,
 }: CongregantModalProps) {
   const [name, setName] = useState('');
   const [gender, setGender] = useState<Gender>('Male');
   const [phoneInput, setPhoneInput] = useState('');
+  const [sendWelcomeSms, setSendWelcomeSms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -32,10 +42,11 @@ export function CongregantModal({
       setName(editingRecord?.name ?? '');
       setGender(editingRecord?.gender ?? 'Male');
       setPhoneInput(editingRecord?.phoneNumber ?? '');
+      setSendWelcomeSms(!editingRecord && defaultSendWelcomeSms && hasSenderNumber);
       setError(null);
       setSaving(false);
     }
-  }, [open, editingRecord]);
+  }, [open, editingRecord, defaultSendWelcomeSms, hasSenderNumber]);
 
   if (!open) return null;
 
@@ -60,6 +71,7 @@ export function CongregantModal({
         name: trimmedName,
         gender,
         phoneNumber: normalizedPreview,
+        sendWelcomeSms: !editingRecord ? sendWelcomeSms : false,
       });
       onClose();
     } catch (err) {
@@ -168,6 +180,34 @@ export function CongregantModal({
               )}
             </p>
           </div>
+
+          {!editingRecord && (
+            <label
+              className={`flex items-start gap-2.5 p-3 rounded-lg border text-xs ${
+                hasSenderNumber
+                  ? 'border-slate-200 bg-slate-50/70 cursor-pointer'
+                  : 'border-slate-200 bg-slate-50/40 opacity-70 cursor-not-allowed'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={sendWelcomeSms}
+                disabled={!hasSenderNumber}
+                onChange={(e) => setSendWelcomeSms(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#123c69] focus:ring-[#123c69]"
+              />
+              <span className="space-y-0.5">
+                <span className="block font-medium text-slate-800">
+                  Send automated welcome SMS after saving
+                </span>
+                <span className="block text-slate-500">
+                  {hasSenderNumber
+                    ? 'Dispatches your configured welcome message template to this congregant.'
+                    : 'Add an Admin Number first to enable automated welcome messages.'}
+                </span>
+              </span>
+            </label>
+          )}
 
           {error && (
             <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">

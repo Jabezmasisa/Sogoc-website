@@ -236,7 +236,7 @@
         },
         "targetFilter": {
           "type": "string",
-          "enum": ["All", "Male", "Female", "Other", "Custom"],
+          "enum": ["All", "Male", "Female", "Other", "Custom", "New Congregant"],
           "description": "Audience filter selected by the administrator."
         },
         "recipientCount": {
@@ -358,6 +358,159 @@
         "error",
         "createdAt"
       ]
+    },
+    "CongregantRegistration": {
+      "title": "CongregantRegistration",
+      "description": "Public congregant self-registration awaiting administrator approval before being promoted into the official congregants directory.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name submitted by the congregant.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["Male", "Female", "Other"],
+          "description": "Gender submitted by the congregant."
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Normalized E.164 phone number submitted by the congregant.",
+          "minLength": 8,
+          "maxLength": 20,
+          "pattern": "^\\+[1-9][0-9]{6,14}$"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional ministry interest, home fellowship, or prayer note.",
+          "minLength": 0,
+          "maxLength": 240
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Review status controlled by portal administrators."
+        },
+        "congregantId": {
+          "type": "string",
+          "description": "ID of the official congregants document created upon approval, or empty string while unapproved.",
+          "minLength": 0,
+          "maxLength": 128,
+          "pattern": "^(?:[a-zA-Z0-9_\\-]+)?$"
+        },
+        "reviewedBy": {
+          "type": "string",
+          "description": "UID of the administrator who approved or rejected the registration, or empty string while pending.",
+          "minLength": 0,
+          "maxLength": 128,
+          "pattern": "^(?:[a-zA-Z0-9_\\-]+)?$"
+        },
+        "reviewedByEmail": {
+          "type": "string",
+          "description": "Email of the administrator who reviewed the registration, or empty string while pending.",
+          "minLength": 0,
+          "maxLength": 254
+        },
+        "welcomeSmsStatus": {
+          "type": "string",
+          "enum": ["not_sent", "sent", "failed"],
+          "description": "Delivery status of the automated welcome SMS for this registration."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the registration was submitted."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the registration was last updated."
+        }
+      },
+      "required": [
+        "name",
+        "gender",
+        "phoneNumber",
+        "notes",
+        "status",
+        "congregantId",
+        "reviewedBy",
+        "reviewedByEmail",
+        "welcomeSmsStatus",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AutomationSetting": {
+      "title": "AutomationSetting",
+      "description": "Administrator-configured automated welcome SMS settings for newly approved or newly added congregants.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether automated welcome SMS sends automatically when an admin approves a congregant registration."
+        },
+        "autoSendOnManualAdd": {
+          "type": "boolean",
+          "description": "Whether automated welcome SMS also dispatches when an admin manually adds a new congregant."
+        },
+        "senderNumber": {
+          "type": "string",
+          "description": "Default E.164 admin sender phone number for automated welcome messages, or empty string.",
+          "minLength": 0,
+          "maxLength": 20,
+          "pattern": "^(?:\\+[1-9][0-9]{6,14})?$"
+        },
+        "senderLabel": {
+          "type": "string",
+          "description": "Display label of the admin sender line.",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "messageTemplate": {
+          "type": "string",
+          "description": "Welcome SMS template supporting {name} placeholder.",
+          "minLength": 1,
+          "maxLength": 640
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "UID of the administrator who last updated the automation setting.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Email of the administrator who last updated the setting.",
+          "minLength": 5,
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the automation setting was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the automation setting was last updated."
+        }
+      },
+      "required": [
+        "enabled",
+        "autoSendOnManualAdd",
+        "senderNumber",
+        "senderLabel",
+        "messageTemplate",
+        "updatedBy",
+        "updatedByEmail",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -390,6 +543,18 @@
         "$ref": "#/entities/Congregant"
       },
       "description": "Congregant directory containing name, gender, and phone number."
+    },
+    "/congregantRegistrations/{registrationId}": {
+      "schema": {
+        "$ref": "#/entities/CongregantRegistration"
+      },
+      "description": "Pending and reviewed public congregant registrations awaiting admin approval."
+    },
+    "/automationSettings/{settingId}": {
+      "schema": {
+        "$ref": "#/entities/AutomationSetting"
+      },
+      "description": "Admin-managed automated SMS templates and triggers for new congregants."
     },
     "/smsCampaigns/{campaignId}": {
       "schema": {
